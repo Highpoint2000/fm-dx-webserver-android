@@ -1,134 +1,128 @@
+// server/stream/index.js
+
 const { spawn, execSync } = require('child_process');
 const { configName, serverConfig, configUpdate, configSave, configExists } = require('../server_config');
 const { logDebug, logError, logInfo, logWarn, logFfmpeg } = require('../console');
 const checkFFmpeg = require('./checkFFmpeg');
 
-let ffmpeg, ffmpegCommand, ffmpegParams;
+let ffmpeg;    // wird von checkFFmpeg() gesetzt
+let ffmpegParams;
 
+/**
+ * Prüft auf macOS nach SoX (rec) und unter Linux nach arecord.
+ * Beendet das Programm mit Fehler, falls die jeweiligen Tools fehlen.
+ */
 function checkAudioUtilities() {
-    if (process.platform === 'darwin') {
-        try {
-            execSync('which rec');
-            //console.log('[Audio Utility Check] SoX ("rec") found.');
-        } catch (error) {
-            logError('[Audio Utility Check] Error: SoX ("rec") not found. Please install SoX (e.g., using `brew install sox`).');
-            process.exit(1); // Exit the process with an error code
-        }
-    } else if (process.platform === 'linux') {
-        try {
-            execSync('which arecord');
-            //console.log('[Audio Utility Check] ALSA ("arecord") found.');
-        } catch (error) {
-            logError('[Audio Utility Check] Error: ALSA ("arecord") not found. Please ensure ALSA utilities are installed (e.g., using `sudo apt-get install alsa-utils` or `sudo yum install alsa-utils`).');
-            process.exit(1); // Exit the process with an error code
-        }
-    } else {
-        //console.log(`[Audio Utility Check] Platform "${process.platform}" does not require explicit checks for rec or arecord.`);
+  if (process.platform === 'darwin') {
+    try {
+      execSync('which rec');
+    } catch {
+      logError('[Audio Utility Check] SoX ("rec") nicht gefunden. Bitte installieren: brew install sox');
+      process.exit(1);
     }
+  } else if (process.platform === 'linux') {
+    try {
+      execSync('which arecord');
+    } catch {
+      logError('[Audio Utility Check] ALSA ("arecord") nicht gefunden. Bitte installieren: pkg install alsa-utils');
+      process.exit(1);
+    }
+  }
 }
 
+/**
+ * Baut je nach Plattform und serverConfig den kompletten Kommando-String
+ * für den Audio-Stream (ffmpeg | rec | arecord).
+ */
 function buildCommand() {
-    // Common audio options for FFmpeg
-    const baseOptions = {
-        flags: '-fflags +nobuffer+flush_packets -flags low_delay -rtbufsize 6192 -probesize 32',
-        codec: `-acodec pcm_s16le -ar 48000 -ac ${serverConfig.audio.audioChannels}`,
-        output: `${serverConfig.audio.audioBoost == true && serverConfig.audio.ffmpeg == true ? '-af "volume=3.5"' : ''} -f s16le -fflags +nobuffer+flush_packets -packetsize 384 -flush_packets 1 -bufsize 960`
-    };
+  // Basis-Optionen für ffmpeg
+  const baseFlags = '-fflags +nobuffer+flush_packets -flags low_delay -rtbufsize 6192 -probesize 32';
+  const codec    = `-acodec pcm_s16le -ar 48000 -ac ${serverConfig.audio.audioChannels}`;
+  const output   = `${serverConfig.audio.audioBoost && serverConfig.audio.ffmpeg
+                    ? '-af "volume=3.5"' : ''} -f s16le -packetsize 384 -flush_packets 1 -bufsize 960`;
 
-    if (process.platform === 'win32') {
-        // Windows: ffmpeg using dshow
-        logInfo('[Audio Stream] Platform: Windows (win32). Using "dshow" input.');
-        ffmpegCommand = `"${ffmpeg.replace(/\\/g, '\\\\')}"`;
-        return `${ffmpegCommand} ${baseOptions.flags} -f dshow -audio_buffer_size 200 -i audio="${serverConfig.audio.audioDevice}" ` +
-            `${baseOptions.codec} ${baseOptions.output} pipe:1 | node server/stream/3las.server.js -port ` +
-            `${serverConfig.webserver.webserverPort + 10} -samplerate 48000 -channels ${serverConfig.audio.audioChannels}`;
-    } else if (process.platform === 'darwin') {
-        // macOS: using SoX's rec with coreaudio
-        if (!serverConfig.audio.ffmpeg) {
-            logInfo('[Audio Stream] Platform: macOS (darwin) using "coreaudio" with the default audio device.');
-            const recCommand = `rec -t coreaudio -b 32 -r 48000 -c ${serverConfig.audio.audioChannels} -t raw -b 16 -r 48000 -c ${serverConfig.audio.audioChannels} -`;
-            return `${recCommand} | node server/stream/3las.server.js -port ${serverConfig.webserver.webserverPort + 10}` + 
-            ` -samplerate 48000 -channels ${serverConfig.audio.audioChannels}`;
-        } else {
-            ffmpegCommand = ffmpeg;
-            ffmpegParams = `${baseOptions.flags} -f alsa -i "${serverConfig.audio.softwareMode && serverConfig.audio.softwareMode == true ? 'plug' : ''}${serverConfig.audio.audioDevice}" ${baseOptions.codec}`;
-            ffmpegParams += ` ${baseOptions.output} -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 pipe:1 | node server/stream/3las.server.js -port ${serverConfig.webserver.webserverPort + 10} -samplerate 48000 -channels ${serverConfig.audio.audioChannels}`;
-            return `${ffmpegCommand} ${ffmpegParams}`;
-        }
+  const portArg = serverConfig.webserver.webserverPort + 10;
+  const nodeStream = ` | node server/stream/3las.server.js -port ${portArg} -samplerate 48000 -channels ${serverConfig.audio.audioChannels}`;
+
+  if (process.platform === 'win32') {
+    logInfo('[Audio Stream] Windows – dshow input');
+    const exe = `"${ffmpeg.replace(/\\/g, '\\\\')}"`;
+    return `${exe} ${baseFlags} -f dshow -audio_buffer_size 200 -i audio="${serverConfig.audio.audioDevice}" ` +
+           `${codec} ${output} pipe:1${nodeStream}`;
+
+  } else if (process.platform === 'darwin') {
+    if (!serverConfig.audio.ffmpeg) {
+      logInfo('[Audio Stream] macOS – coreaudio via rec');
+      return `rec -t coreaudio -b 32 -r 48000 -c ${serverConfig.audio.audioChannels} -t raw - |` +
+             ` node server/stream/3las.server.js -port ${portArg} -samplerate 48000 -channels ${serverConfig.audio.audioChannels}`;
     } else {
-        // Linux: use alsa with arecord
-        // If softwareMode is enabled, prefix the device with 'plug'
-        if (!serverConfig.audio.ffmpeg) {
-            const audioDevicePrefix = (serverConfig.audio.softwareMode && serverConfig.audio.softwareMode === true) ? 'plug' : '';
-            logInfo('[Audio Stream] Platform: Linux. Using "alsa" input.');
-            const recCommand = `while true; do arecord -D "${audioDevicePrefix}${serverConfig.audio.audioDevice}" -f S16_LE -r 48000 -c ${serverConfig.audio.audioChannels} -t raw -; done`;
-            return `${recCommand} | node server/stream/3las.server.js -port ${serverConfig.webserver.webserverPort + 10}` + 
-            ` -samplerate 48000 -channels ${serverConfig.audio.audioChannels}`;
-        } else {
-            ffmpegCommand = ffmpeg;
-            ffmpegParams = `${baseOptions.flags} -f alsa -i "${serverConfig.audio.softwareMode && serverConfig.audio.softwareMode == true ? 'plug' : ''}${serverConfig.audio.audioDevice}" ${baseOptions.codec}`;
-            ffmpegParams += ` ${baseOptions.output} -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 pipe:1 | node server/stream/3las.server.js -port ${serverConfig.webserver.webserverPort + 10} -samplerate 48000 -channels ${serverConfig.audio.audioChannels}`;
-            return `${ffmpegCommand} ${ffmpegParams}`;
-        }
+      logInfo('[Audio Stream] macOS – ffmpeg über ALSA');
+      ffmpegParams = `${baseFlags} -f alsa -i "${serverConfig.audio.softwareMode ? 'plug:' : ''}${serverConfig.audio.audioDevice}" ` +
+                     `${codec} ${output} -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 pipe:1${nodeStream}`;
+      return `${ffmpeg} ${ffmpegParams}`;
     }
+
+  } else { // Linux
+    if (!serverConfig.audio.ffmpeg) {
+      logInfo('[Audio Stream] Linux – ALSA via arecord');
+      const dev = `${serverConfig.audio.softwareMode ? 'plug:' : ''}${serverConfig.audio.audioDevice}`;
+      return `while true; do arecord -D "${dev}" -f S16_LE -r 48000 -c ${serverConfig.audio.audioChannels} -t raw -; done${nodeStream}`;
+    } else {
+      logInfo('[Audio Stream] Linux – ffmpeg über ALSA');
+      ffmpegParams = `${baseFlags} -f alsa -i "${serverConfig.audio.softwareMode ? 'plug:' : ''}${serverConfig.audio.audioDevice}" ` +
+                     `${codec} ${output} -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 10 pipe:1${nodeStream}`;
+      return `${ffmpeg} ${ffmpegParams}`;
+    }
+  }
 }
 
+/**
+ * Startet den Audio-Stream, indem das zuvor gebaute Kommando in einer Shell ausgeführt wird.
+ * Loggt stdout/err und überprüft den Streaming-Start anhand der ffmpeg-Ausgabe.
+ */
 function enableAudioStream() {
-    // Ensure the webserver port is a number.
-    serverConfig.webserver.webserverPort = Number(serverConfig.webserver.webserverPort);
-    let startupSuccess = false;
-    const command = buildCommand();
+  const command = buildCommand();
+  let started = false;
 
-    // Only log audio device details if the platform is not macOS.
-    if (process.platform !== 'darwin') {
-        logInfo(`Trying to start audio stream on device: \x1b[35m${serverConfig.audio.audioDevice}\x1b[0m`);
+  if (!serverConfig.audio.audioDevice || serverConfig.audio.audioDevice.length < 2) {
+    logWarn('[Audio Stream] Kein Audio-Gerät konfiguriert – überspringe Streaming.');
+    return;
+  }
+
+  logInfo(`[Audio Stream] Kommando:\n${command}`);
+  logInfo(`[Audio Stream] Port: ${serverConfig.webserver.webserverPort + 10}`);
+  logInfo(`[Audio Stream] Using ${ffmpeg === 'ffmpeg' ? 'system-installed FFmpeg' : 'ffmpeg-static (Entfernt!)'}`);
+
+  const child = spawn(command, { shell: true });
+
+  child.stdout.on('data', data => logFfmpeg(`[stream:stdout] ${data}`));
+  child.stderr.on('data', data => {
+    const text = data.toString();
+    logFfmpeg(`[stream:stderr] ${text}`);
+    if (text.includes('I/O error')) {
+      logError(`[Audio Stream] Gerät "${serverConfig.audio.audioDevice}" konnte nicht geöffnet werden.`);
+      logError('Starte mit `node . --ffmpegdebug` für mehr Details.');
     }
-    else {
-        // For macOS, log the default audio device.
-        logInfo(`Trying to start audio stream on default input device.`);
+    if (text.match(/size=\s*\d+/) && !started) {
+      logInfo('[Audio Stream] Stream erfolgreich gestartet.');
+      started = true;
     }
+  });
 
-    logInfo(`Using internal audio network port: ${serverConfig.webserver.webserverPort + 10}`);
-    logInfo('Using', ffmpeg === 'ffmpeg' ? 'system-installed FFmpeg' : 'ffmpeg-static');
-    logDebug(`[Audio Stream] Full command:\n${command}`);
-
-    // Start the stream only if a valid audio device is configured.
-    if (serverConfig.audio.audioDevice && serverConfig.audio.audioDevice.length > 2) {
-        const childProcess = spawn(command, { shell: true });
-
-        childProcess.stdout.on('data', (data) => {
-            logFfmpeg(`[stream:stdout] ${data}`);
-        });
-
-        childProcess.stderr.on('data', (data) => {
-            logFfmpeg(`[stream:stderr] ${data}`);
-
-            if (data.includes('I/O error')) {
-                logError(`[Audio Stream] Audio device "${serverConfig.audio.audioDevice}" failed to start.`);
-                logError('Please start the server with: node . --ffmpegdebug for more info.');
-            }
-            if (data.includes('size=') && !startupSuccess) {
-                logInfo('[Audio Stream] Audio stream started up successfully.');
-                startupSuccess = true;
-            }
-        });
-
-        childProcess.on('close', (code) => {
-            logFfmpeg(`[Audio Stream] Child process exited with code: ${code}`);
-        });
-
-        childProcess.on('error', (err) => {
-            logFfmpeg(`[Audio Stream] Error starting child process: ${err}`);
-        });
-    } else {
-        logWarn('[Audio Stream] No valid audio device configured. Skipping audio stream initialization.');
-    }
+  child.on('close', code => logFfmpeg(`[Audio Stream] Kindprozess beendet mit Code ${code}`));
+  child.on('error', err  => logFfmpeg(`[Audio Stream] Fehler beim Starten des Kindprozesses: ${err}`));
 }
 
-if(configExists()) {
-    checkFFmpeg().then((ffmpegResult) => {
-        ffmpeg = ffmpegResult;
-        if (!serverConfig.audio.ffmpeg) checkAudioUtilities();
-        enableAudioStream();
+// Wenn Konfiguration existiert, prüfen wir ffmpeg und starten dann den Stream
+if (configExists()) {
+  checkFFmpeg()
+    .then(cmd => {
+      ffmpeg = cmd;
+      if (!serverConfig.audio.ffmpeg) checkAudioUtilities();
+      enableAudioStream();
+    })
+    .catch(err => {
+      console.error(err.message);
+      process.exit(1);
     });
 }
