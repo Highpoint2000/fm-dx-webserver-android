@@ -1,0 +1,164 @@
+
+:root {
+    --color-main: rgb(32, 34, 40);
+    --color-main-bright: rgb(88, 219, 171);
+    --color-text: rgb(255, 255, 255);
+    
+    --color-1: color-mix(in srgb, var(--color-main) 95%, var(--color-main-bright)); /* 5% Brightness */
+    --color-2: color-mix(in srgb, var(--color-main) 75%, var(--color-main-bright)); /* 25% Brightness */
+    --color-3: color-mix(in srgb, var(--color-main) 50%, var(--color-main-bright)); /* 50% Brightness */
+    --color-4: color-mix(in srgb, var(--color-main) 20%, var(--color-main-bright)); /* 80% Brightness */
+    --color-5: color-mix(in srgb, var(--color-main) 5%, var(--color-main-bright)); /* 95% Brightness */
+
+    --color-1-transparent: color-mix(in srgb, var(--color-1), transparent 40%);
+    --color-2-transparent: color-mix(in srgb, var(--color-2), transparent 40%);
+    --color-3-transparent: color-mix(in srgb, var(--color-3), transparent 40%);
+    --color-4-transparent: color-mix(in srgb, var(--color-4), transparent 40%);
+    --color-5-transparent: color-mix(in srgb, var(--color-5), transparent 40%);
+    
+    --color-text-2: rgb(240,240,240);
+}
+
+* {
+    box-sizing: border-box;
+}
+
+::selection {
+    background: var(--color-main-bright);
+    color: inherit;
+}
+
+/* width */
+::-webkit-scrollbar {
+    width: 6px;
+}
+
+/* Track */
+::-webkit-scrollbar-track {
+    background: var(--color-1); 
+}
+
+/* Handle */
+::-webkit-scrollbar-thumb {
+    background: var(--color-2); 
+}
+
+/* Handle on hover */
+::-webkit-scrollbar-thumb:hover {
+    background: var(--color-3); 
+}
+
+body {
+    font-family: 'Titillium Web', sans-serif;
+    color: var(--color-text);
+    background: var(--color-main);
+    background-repeat: no-repeat;
+    background-position: center;
+    background-size: cover;
+    transition: 0.3s ease background-color;
+    margin: 0 auto;
+    min-height: 100%;
+}
+
+.wrapper-outer {
+    width: 100%;
+    height: auto;
+    background-color: var(--color-main);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-direction: column;
+}
+
+.wrapper-outer:not(.dashboard-panel) {
+    min-height: calc(100vh - 84px);
+}
+
+.wrapper-outer.wrapper-full {
+    min-height: 100vh;
+}
+
+.wrapper-outer-static {
+    display: block !important;
+    padding-top: 10px;
+}
+
+#wrapper {
+    width: 100%;
+    max-width: calc(0% + 1180px);
+}
+
+#wrapper.setup-wrapper {
+    margin: auto;
+    position: static;
+    transform: none;
+    width: calc(100% - 420px);
+    margin-left: 420px;
+}
+
+a {
+    text-decoration: none;
+    color: var(--color-text-2);
+}
+
+a:hover {
+    border-bottom: 1px solid var(--color-4);
+}
+
+a.hide-underline:hover {
+    border-bottom: none;
+}
+
+hr {
+    color: var(--color-4);
+}
+
+.table-big {
+    border-radius: 15px;
+    background-color: var(--color-2);
+    padding: 20px;
+    margin: auto;
+}
+
+.table-big th {
+    padding: 8px 20px;
+    outline: 1px solid var(--color-3);
+    background-color: var(--color-3);
+}
+
+.table-big td {
+    padding: 8px 20px;
+}
+
+.table-big td:nth-child(1) {
+    text-align: left;
+}
+
+.table-big td:nth-child(2) {
+    color: var(--color-main-bright);
+    text-align: left;
+}
+
+
+.table-big th:nth-child(1) {
+    border-radius: 15px 0px 0px 15px; 
+}
+
+.table-big th:nth-last-child(1){
+      border-radius: 0px 15px 15px 0px;
+}
+
+@media (max-width: 768px) {
+    #wrapper.setup-wrapper {
+        width: 100%;
+        margin-left: 0;
+    }
+
+    .setup-wrapper h2 {
+        display: initial;
+    }
+
+    .wrapper-outer {
+        justify-content: flex-start;
+    }
+}
