@@ -2,7 +2,7 @@
 
 const exec = require('child_process').exec;
 const fs = require('fs');
-const ffmpeg = require('ffmpeg-static');
+const ffmpeg = 'ffmpeg';
 const filePath = '/proc/asound/cards';
 const platform = process.platform;
 
