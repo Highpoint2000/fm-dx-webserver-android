@@ -17,7 +17,6 @@
     "ejs": "3.1.10",
     "express": "5.1.0",
     "express-session": "1.18.1",
-    "ffmpeg-static": "5.2.0",
     "http": "0.0.1-security",
     "http-proxy": "1.18.1",
     "koffi": "2.7.2",
